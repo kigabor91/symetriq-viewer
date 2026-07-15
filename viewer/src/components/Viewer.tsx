@@ -1,10 +1,24 @@
 import { useEffect, useRef } from "react";
+import { Viewer as XeokitViewer } from "@xeokit/xeokit-sdk";
 
 function Viewer() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     useEffect(() => {
-        console.log("Viewer initialized");
+        if (!canvasRef.current) {
+            return;
+        }
+
+        const viewer = new XeokitViewer({
+            canvasElement: canvasRef.current,
+            transparent: false,
+        });
+
+        console.log("xeokit viewer created", viewer);
+
+        return () => {
+            viewer.destroy();
+        };
     }, []);
 
     return (
@@ -14,7 +28,6 @@ function Viewer() {
                 width: "100%",
                 height: "100%",
                 display: "block",
-                backgroundColor: "#202124",
             }}
         />
     );
