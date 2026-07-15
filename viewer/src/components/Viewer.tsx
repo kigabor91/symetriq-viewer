@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Viewer as XeokitViewer } from "@xeokit/xeokit-sdk";
+import { ViewerService } from "../services/ViewerService";
 
 function Viewer() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -9,15 +9,12 @@ function Viewer() {
             return;
         }
 
-        const viewer = new XeokitViewer({
-            canvasElement: canvasRef.current,
-            transparent: false,
-        });
+        const viewerService = new ViewerService();
 
-        console.log("xeokit viewer created", viewer);
+        viewerService.initialize(canvasRef.current);
 
         return () => {
-            viewer.destroy();
+            viewerService.destroy();
         };
     }, []);
 
