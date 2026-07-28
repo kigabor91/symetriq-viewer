@@ -1,0 +1,92 @@
+diff --git a/node_modules/@xeokit/xeokit-sdk/dist/xeokit-sdk.es.js b/node_modules/@xeokit/xeokit-sdk/dist/xeokit-sdk.es.js
+index e7ebf6d..6fb473c 100644
+--- a/node_modules/@xeokit/xeokit-sdk/dist/xeokit-sdk.es.js
++++ b/node_modules/@xeokit/xeokit-sdk/dist/xeokit-sdk.es.js
+@@ -114537,7 +114537,7 @@ class TransformControl {
+ 
+         const rootNode = new Node$1(scene, { // Root of Node graph that represents this control in the 3D scene
+             position: [0, 0, 0],
+-            scale: [5, 5, 5],
++            scale: [2.5, 2.5, 2.5],
+             isObject: false
+         });
+ 
+@@ -114910,10 +114910,10 @@ class TransformControl {
+                 const dist = Math.abs(math.distVec3(camera.eye, pos));
+                 if (camera.projection === "perspective") {
+                     if (dist !== lastDist) {
+-                        setRootNodeScale(0.07 * dist * Math.tan(camera.perspective.fov * math.DEGTORAD));
++                        setRootNodeScale(0.035 * dist * Math.tan(camera.perspective.fov * math.DEGTORAD));
+                     }
+                 } else if (camera.projection === "ortho") {
+-                    setRootNodeScale(camera.ortho.scale / 10);
++                    setRootNodeScale(camera.ortho.scale / 20);
+                 }
+                 lastDist = dist;
+             });
+@@ -115763,7 +115763,7 @@ class SectionPlanesPlugin extends Plugin {
+                                      collidable: true,
+                                      clippable: false,
+                                      visible: false,
+-                                     scale: [2.4, 2.4, 1],
++                                     scale: [1.6, 1.6, 1],
+                                      isObject: false
+                                  }));
+ 
+@@ -117281,7 +117281,7 @@ class FaceAlignedSectionPlanesControl {
+ 
+         this._rootNode = new Node$1(scene, {
+             position: [0, 0, 0],
+-            scale: [5, 5, 5]
++            scale: [2.5, 2.5, 2.5]
+         });
+ 
+         const rootNode = this._rootNode;
+@@ -117377,7 +117377,7 @@ class FaceAlignedSectionPlanesControl {
+                 collidable: true,
+                 clippable: false,
+                 visible: false,
+-                scale: [2.4, 2.4, 1]
++                scale: [1.6, 1.6, 1]
+             }), NO_STATE_INHERIT),
+ 
+             planeFrame: rootNode.addChild(new Mesh(rootNode, { // Visible frame
+diff --git a/node_modules/@xeokit/xeokit-sdk/src/plugins/SectionPlanesPlugin/SectionPlanesPlugin.js b/node_modules/@xeokit/xeokit-sdk/src/plugins/SectionPlanesPlugin/SectionPlanesPlugin.js
+index f93b040..f2d20df 100644
+--- a/node_modules/@xeokit/xeokit-sdk/src/plugins/SectionPlanesPlugin/SectionPlanesPlugin.js
++++ b/node_modules/@xeokit/xeokit-sdk/src/plugins/SectionPlanesPlugin/SectionPlanesPlugin.js
+@@ -281,7 +281,7 @@ class SectionPlanesPlugin extends Plugin {
+                                      collidable: true,
+                                      clippable: false,
+                                      visible: false,
+-                                     scale: [2.4, 2.4, 1],
++                                     scale: [1.6, 1.6, 1],
+                                      isObject: false
+                                  }));
+ 
+diff --git a/node_modules/@xeokit/xeokit-sdk/src/plugins/TransformControl/TransformControl.js b/node_modules/@xeokit/xeokit-sdk/src/plugins/TransformControl/TransformControl.js
+index 09b5b5e..a457f64 100644
+--- a/node_modules/@xeokit/xeokit-sdk/src/plugins/TransformControl/TransformControl.js
++++ b/node_modules/@xeokit/xeokit-sdk/src/plugins/TransformControl/TransformControl.js
+@@ -36,7 +36,7 @@ class TransformControl {
+ 
+         const rootNode = new Node(scene, { // Root of Node graph that represents this control in the 3D scene
+             position: [0, 0, 0],
+-            scale: [5, 5, 5],
++            scale: [2.5, 2.5, 2.5],
+             isObject: false
+         });
+ 
+@@ -409,10 +409,10 @@ class TransformControl {
+                 const dist = Math.abs(math.distVec3(camera.eye, pos));
+                 if (camera.projection === "perspective") {
+                     if (dist !== lastDist) {
+-                        setRootNodeScale(0.07 * dist * Math.tan(camera.perspective.fov * math.DEGTORAD));
++                        setRootNodeScale(0.035 * dist * Math.tan(camera.perspective.fov * math.DEGTORAD));
+                     }
+                 } else if (camera.projection === "ortho") {
+-                    setRootNodeScale(camera.ortho.scale / 10);
++                    setRootNodeScale(camera.ortho.scale / 20);
+                 }
+                 lastDist = dist;
+             });

@@ -1,5 +1,25 @@
 # React + TypeScript + Vite
 
+## SymetrIQ local project workflow
+
+First start the converter project server in a separate terminal:
+
+```powershell
+cd C:\Development\symetriq-converter
+npm run server
+```
+
+Then start this frontend:
+
+```powershell
+cd C:\Development\symetriq-viewer\viewer
+npm run dev
+```
+
+Open `http://localhost:5173`, create a project, upload IFC/LAS/LAZ files and
+open the project with the **Scene** button when at least one file is ready.
+The project page polls conversion status automatically.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
