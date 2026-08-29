@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:alpha": "vite --mode alpha",
     "build": "tsc -b && vite build",
     "build:production": "npm run build && node deployment/copy-iis-config.mjs",
     "lint": "eslint .",

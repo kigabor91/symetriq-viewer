@@ -16,6 +16,16 @@ cd C:\Development\symetriq-viewer\viewer
 npm run dev
 ```
 
+For the shared Alpha Hub backend (the same one used by the Revit Copilot), run:
+
+```powershell
+npm run dev:alpha
+```
+
+This keeps the frontend local while proxying `/api` and `/project-files` to the
+Alpha backend configured in `.env.alpha`. Normal `npm run dev` continues to use
+the local backend at `http://localhost:3101`.
+
 Open `http://localhost:5173`, create a project, upload IFC/LAS/LAZ files and
 open the project with the **Scene** button when at least one file is ready.
 The project page polls conversion status automatically.
