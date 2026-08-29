@@ -152,7 +152,8 @@ Invoke-RestMethod http://127.0.0.1:3001/api/projects
 | metadata JSON | IIS `/project-files` | 1 év; `?v=revision` verziózza | Brotli/Gzip |
 | panoráma JPG/WebP, thumbnail, issue-kép | IIS `/project-files` | 1 év; fájlnév vagy revision változik | nincs – képek eleve tömörítettek |
 
-Az IIS web.config a LAS/LAZ/XKT/GLB MIME típusokat is beállítja. Az IIS
+Az IIS web.config a LAS/LAZ/XKT MIME típusokat is beállítja. A GLB MIME típust
+a modern IIS alapértelmezetten ismeri. Az IIS
 statikus fájlkiszolgálása támogatja a `Range` kéréseket; ez különösen alkalmas
 nagy objektumok folytatható átvitelére. Nem szabad HTTP-szinten tömöríteni a
 LAS/LAZ és JPEG fájlokat, mert ez CPU-t fogyasztana és ronthatná a byte-range
