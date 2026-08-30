@@ -20,7 +20,7 @@ import type { ViewerAdapter, ViewerAdapterEvents } from "./ViewerAdapter";
 /** Xeokit implementation of the renderer-independent ViewerAdapter contract. */
 export class ViewerService implements ViewerAdapter {
 
-    private static readonly MAX_SCENE_SPAN_METERS = 1000;
+    private static readonly MAX_SCENE_SPAN_METERS = 2000;
     private viewer: XeokitViewer | null = null;
     private bcfViewpoints: BCFViewpointsPlugin | null = null;
     private sectionPlanes: SectionPlanesPlugin | null = null;
