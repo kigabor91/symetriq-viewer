@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ModelMetadata } from "../models/ModelMetadata";
+import type { ModelElement, ModelMetadata, ModelPropertySet } from "../models/ModelMetadata";
 import type {
     ElementActionContext,
     ElementSelection,
@@ -20,6 +20,7 @@ import {
     listProjectIssues,
     listProjectPropertyViews,
     listProjectDisplayViews,
+    getPublishedElementProperties,
     updateProjectIssue,
     updateProjectIssueStatus,
 } from "../services/ProjectService";
@@ -71,6 +72,25 @@ function getDefaultPropertyKeys(properties: AvailableProperty[]): string[] {
     return namedDefaults.length > 0
         ? namedDefaults
         : properties.slice(0, 12).map((property) => property.key);
+}
+
+function bootstrapPropertySets(element: ModelElement, metadata: ModelMetadata | undefined): ModelPropertySet[] {
+    const stored = element.propertySetIds
+        .map((id) => metadata?.propertySets[id])
+        .filter((propertySet): propertySet is ModelPropertySet => propertySet !== undefined);
+    if (!element.identity) return stored;
+    return [{
+        id: `bootstrap:${element.globalId}`,
+        name: "Revit Identity",
+        type: "Revit",
+        properties: [
+            { name: "Logical Element ID", value: element.identity.logicalElementId, type: "string" },
+            { name: "Revit Unique ID", value: element.identity.revitUniqueId, type: "string" },
+            { name: "Category", value: element.identity.category, type: "string" },
+            { name: "Family", value: element.identity.family, type: "string" },
+            { name: "Type", value: element.identity.type, type: "string" },
+        ],
+    }];
 }
 
 function hexToRgb(color: string): [number, number, number] {
@@ -177,6 +197,10 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
     const [metadataByModelId, setMetadataByModelId] = useState<Record<string, ModelMetadata>>({});
     const [isPropertyConfigurationOpen, setIsPropertyConfigurationOpen] = useState(false);
     const [showAllProperties, setShowAllProperties] = useState(false);
+    const [retrievedPropertySets, setRetrievedPropertySets] = useState<ModelPropertySet[] | null>(null);
+    const [retrievedPropertyReference, setRetrievedPropertyReference] = useState<string | null>(null);
+    const [isPropertyRetrievalLoading, setIsPropertyRetrievalLoading] = useState(false);
+    const [propertyRetrievalError, setPropertyRetrievalError] = useState("");
     const [propertySearch, setPropertySearch] = useState("");
     const [isCutMode, setIsCutMode] = useState(false);
     const [cutCount, setCutCount] = useState(0);
@@ -353,6 +377,8 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
             ),
             onSelectionChanged: (nextSelection) => {
                 setSelection(nextSelection);
+                setShowAllProperties(false);
+                setPropertyRetrievalError("");
                 if (!nextSelection) {
                     setElementActionContext(null);
                 }
@@ -436,17 +462,22 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
     const selectedElement = selection
         ? selectedMetadata?.elements[selection.rendererObjectId]
         : undefined;
-    const propertySets = selectedElement
-        ? selectedElement.propertySetIds
-            .map((id) => selectedMetadata?.propertySets[id])
-            .filter((propertySet) => propertySet !== undefined)
+    const bootstrapSets = selectedElement
+        ? bootstrapPropertySets(selectedElement, selectedMetadata)
         : [];
+    const selectedRenderObjectId = selectedElement?.propertyStore?.renderObjectId;
+    const propertySets = showAllProperties
+        && selectedRenderObjectId
+        && retrievedPropertyReference === `${selection?.modelId}:${selectedRenderObjectId}`
+        && retrievedPropertySets
+        ? retrievedPropertySets
+        : bootstrapSets;
     const effectiveVisiblePropertyKeys = visiblePropertyKeys
         ?? getDefaultPropertyKeys(availableProperties);
     const selectedPropertyKeys = new Set(effectiveVisiblePropertyKeys);
     const selectedProperties = propertySets.flatMap((propertySet) =>
         propertySet.properties
-            .filter((property) => showAllProperties || selectedPropertyKeys.has(
+            .filter((property) => Boolean(selectedElement?.identity) || showAllProperties || selectedPropertyKeys.has(
                 getPropertyKey(propertySet.name, property.name),
             ))
             .map((property) => ({
@@ -457,6 +488,35 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                 propertySetName: propertySet.name,
             })),
     );
+    const toggleAllProperties = async () => {
+        if (!selectedElement) return;
+        if (showAllProperties) {
+            setShowAllProperties(false);
+            return;
+        }
+        const renderObjectId = selectedElement.propertyStore?.renderObjectId;
+        if (!renderObjectId || !selection) {
+            setPropertyRetrievalError("Full properties are not available for this model.");
+            return;
+        }
+        const reference = `${selection.modelId}:${renderObjectId}`;
+        if (retrievedPropertyReference === reference && retrievedPropertySets) {
+            setShowAllProperties(true);
+            return;
+        }
+        setIsPropertyRetrievalLoading(true);
+        setPropertyRetrievalError("");
+        try {
+            const response = await getPublishedElementProperties(projectId, selection.modelId, renderObjectId);
+            setRetrievedPropertyReference(reference);
+            setRetrievedPropertySets(response.propertySets);
+            setShowAllProperties(true);
+        } catch (error) {
+            setPropertyRetrievalError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setIsPropertyRetrievalLoading(false);
+        }
+    };
     const filteredAvailableProperties = availableProperties.filter((property) =>
         `${property.propertySetName} ${property.propertyName}`
             .toLocaleLowerCase()
@@ -1530,10 +1590,14 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                         <button
                             type="button"
                             className="show-all-button"
-                            onClick={() => setShowAllProperties((previous) => !previous)}
+                            disabled={isPropertyRetrievalLoading}
+                            onClick={() => void toggleAllProperties()}
                         >
-                            {showAllProperties ? "Show configured properties" : "Show all properties"}
+                            {isPropertyRetrievalLoading
+                                ? "Loading properties..."
+                                : showAllProperties ? "Show configured properties" : "Show all properties"}
                         </button>
+                        {propertyRetrievalError && <p className="selection-note">{propertyRetrievalError}</p>}
                     </>
                 )}
             </aside>}

@@ -2,6 +2,14 @@ import type { Project } from "../models/Project";
 import type { CreateProjectIssue, ProjectIssue, UpdateProjectIssue } from "../models/ProjectIssue";
 import type { ProjectPropertyView } from "../models/ProjectPropertyView";
 import type { ProjectDisplayView } from "../models/ProjectDisplayView";
+import type { ModelPropertySet } from "../models/ModelMetadata";
+
+export interface RetrievedElementProperties {
+    renderObjectId: string;
+    logicalElementId: string;
+    sourceElementId: string;
+    propertySets: ModelPropertySet[];
+}
 
 async function readResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
@@ -28,6 +36,16 @@ export async function createProject(
 
 export async function getProject(projectId: string): Promise<Project> {
     return readResponse<Project>(await fetch(`/api/projects/${projectId}`));
+}
+
+export async function getPublishedElementProperties(
+    projectId: string,
+    modelId: string,
+    renderObjectId: string,
+): Promise<RetrievedElementProperties> {
+    return readResponse<RetrievedElementProperties>(await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/models/${encodeURIComponent(modelId)}/render-objects/${encodeURIComponent(renderObjectId)}/properties`,
+    ));
 }
 
 export async function updateProject(

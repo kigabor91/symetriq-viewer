@@ -18,6 +18,16 @@ export interface ModelElement {
     name: string;
     parentId?: string;
     propertySetIds: string[];
+    /** Lightweight identity projection for published Revit models. */
+    identity?: {
+        logicalElementId: string;
+        revitUniqueId: string;
+        category: string;
+        family: string;
+        type: string;
+    };
+    /** Canonical Hub reference; never inferred from an XKT node name. */
+    propertyStore?: { renderObjectId: string };
 }
 
 export interface ModelLevel {
