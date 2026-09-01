@@ -1490,8 +1490,8 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                     {activeTool === "plan" && (
                         <>
                             <h2>Plan</h2>
-                            {!planReferenceModelId && <p>Select an IFC as plan reference on the project page.</p>}
-                            {planReferenceModelId && planLevels.length === 0 && <p>The reference IFC does not contain usable IfcBuildingStorey elevations yet. Reprocess it after this update.</p>}
+                            {!planReferenceModelId && <p>Select a model as the plan reference on the project page.</p>}
+                            {planReferenceModelId && planLevels.length === 0 && <p>The reference model does not contain usable canonical level elevations yet. Reprocess it after this update.</p>}
                             <div className="plan-level-buttons">{planLevels.map((level) => <button key={level.id} type="button" className={selectedPlanLevelId === level.id && isPlanMode ? "cut-button is-active" : "cut-button"} onClick={() => openPlanLevel(level.id)}>{level.name}</button>)}</div>
                             {isPlanMode && <button type="button" className="cut-button" onClick={closePlanView}>Back to 3D</button>}
                             {planReferenceModelId && <div className="plan-range-controls">
