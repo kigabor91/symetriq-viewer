@@ -20,6 +20,16 @@ export interface PropertyDefinitionCatalogEntry {
     scope: "instance" | "type";
 }
 
+export interface CanonicalPropertyValue {
+    valueId: string;
+    displayValue: string;
+    count: number;
+}
+
+export interface CanonicalPropertyMatches {
+    rendererObjectIds: string[];
+}
+
 async function readResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
         const body = await response.json().catch(() => ({})) as { error?: string };
@@ -63,6 +73,28 @@ export async function getPropertyDefinitionCatalog(
 ): Promise<PropertyDefinitionCatalogEntry[]> {
     return readResponse<PropertyDefinitionCatalogEntry[]>(await fetch(
         `/api/projects/${encodeURIComponent(projectId)}/models/${encodeURIComponent(modelId)}/property-definitions`,
+    ));
+}
+
+export async function getCanonicalPropertyValues(
+    projectId: string,
+    modelId: string,
+    propertyDefinitionId: string,
+): Promise<CanonicalPropertyValue[]> {
+    return readResponse<CanonicalPropertyValue[]>(await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/models/${encodeURIComponent(modelId)}/property-definitions/${encodeURIComponent(propertyDefinitionId)}/values`,
+    ));
+}
+
+export async function getCanonicalPropertyMatches(
+    projectId: string,
+    modelId: string,
+    propertyDefinitionId: string,
+    valueIds: string[],
+): Promise<CanonicalPropertyMatches> {
+    const query = new URLSearchParams({ values: valueIds.join(",") });
+    return readResponse<CanonicalPropertyMatches>(await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/models/${encodeURIComponent(modelId)}/property-definitions/${encodeURIComponent(propertyDefinitionId)}/matches?${query.toString()}`,
     ));
 }
 

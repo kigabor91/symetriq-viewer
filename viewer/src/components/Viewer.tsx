@@ -21,6 +21,8 @@ import {
     listProjectPropertyViews,
     listProjectDisplayViews,
     getPublishedElementProperties,
+    getCanonicalPropertyMatches,
+    getCanonicalPropertyValues,
     getPropertyDefinitionCatalog,
     type PropertyDefinitionCatalogEntry,
     updateProjectIssue,
@@ -53,8 +55,18 @@ interface AvailableProperty {
 }
 
 interface FilterValue {
+    id: string;
     value: string;
     count: number;
+}
+
+function encodeModelValueId(modelId: string, valueId: string): string {
+    return `${modelId}|${valueId}`;
+}
+
+function decodeModelValueId(id: string): { modelId: string; valueId: string } | null {
+    const separator = id.indexOf("|");
+    return separator > 0 ? { modelId: id.slice(0, separator), valueId: id.slice(separator + 1) } : null;
 }
 
 interface PanoramaMarkerLayout {
@@ -68,7 +80,10 @@ function getPropertyKey(propertySetName: string, propertyName: string): string {
 }
 
 function propertyDefinitionKey(propertySet: ModelPropertySet, property: ModelPropertySet["properties"][number]): string {
-    return property.propertyDefinitionId ?? getPropertyKey(propertySet.name, property.name);
+    if (propertySet.name === "Revit Identity" && ["Category", "Family", "Type"].includes(property.name)) {
+        return `canonical:facet:${property.name.toLocaleLowerCase()}`;
+    }
+    return property.propertyDefinitionId ?? `canonical:instance:${propertySet.name}:${property.name}`;
 }
 
 function getDefaultPropertyKeys(properties: AvailableProperty[]): string[] {
@@ -78,6 +93,19 @@ function getDefaultPropertyKeys(properties: AvailableProperty[]): string[] {
     return namedDefaults.length > 0
         ? namedDefaults
         : properties.slice(0, 12).map((property) => property.key);
+}
+
+/** Keeps older name-based saved views usable while all new views persist canonical IDs. */
+function normalizePropertyKeys(keys: string[], properties: AvailableProperty[]): string[] {
+    return keys.map((key) => {
+        if (key.startsWith("canonical:")) return key;
+        const matching = properties.find((property) => getPropertyKey(property.propertySetName, property.propertyName) === key);
+        return matching?.key ?? key;
+    });
+}
+
+function normalizePropertyKey(key: string, properties: AvailableProperty[]): string {
+    return normalizePropertyKeys([key], properties)[0] ?? key;
 }
 
 function bootstrapPropertySets(element: ModelElement, metadata: ModelMetadata | undefined): ModelPropertySet[] {
@@ -261,6 +289,7 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
     const [filterSelectedValues, setFilterSelectedValues] = useState<string[]>([]);
     const [filterValueSearch, setFilterValueSearch] = useState("");
     const [filterPropertySearch, setFilterPropertySearch] = useState("");
+    const [filterValues, setFilterValues] = useState<FilterValue[]>([]);
     const [propertyViews, setPropertyViews] = useState<ProjectPropertyView[]>([]);
     const [propertyViewName, setPropertyViewName] = useState("");
     const [propertyViewError, setPropertyViewError] = useState("");
@@ -272,6 +301,7 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
     const [displaySelectedValues, setDisplaySelectedValues] = useState<string[]>([]);
     const [displayPropertySearch, setDisplayPropertySearch] = useState("");
     const [displayValueSearch, setDisplayValueSearch] = useState("");
+    const [displayValues, setDisplayValues] = useState<FilterValue[]>([]);
     const [displayColor, setDisplayColor] = useState("#ff8a00");
     const [displayViewName, setDisplayViewName] = useState("");
     const [displayViews, setDisplayViews] = useState<ProjectDisplayView[]>([]);
@@ -340,18 +370,6 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
 
     const availableProperties = useMemo(() => {
         const properties = new Map<string, AvailableProperty>();
-        Object.values(metadataByModelId).forEach((metadata) => {
-            Object.values(metadata.propertySets).forEach((propertySet) => {
-                propertySet.properties.forEach((property) => {
-                    const key = getPropertyKey(propertySet.name, property.name);
-                    properties.set(key, {
-                        key,
-                        propertySetName: propertySet.name,
-                        propertyName: property.name,
-                    });
-                });
-            });
-        });
         Object.values(propertyDefinitionsByModelId).forEach((definitions) => {
             definitions.forEach((definition) => {
                 properties.set(definition.propertyDefinitionId, {
@@ -365,10 +383,9 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
             `${left.propertySetName} ${left.propertyName}`.localeCompare(
                 `${right.propertySetName} ${right.propertyName}`,
             ));
-    }, [metadataByModelId, propertyDefinitionsByModelId]);
+    }, [propertyDefinitionsByModelId]);
 
-    const openPropertyConfiguration = async () => {
-        setIsPropertyConfigurationOpen(true);
+    const loadPropertyDefinitionCatalogs = async () => {
         const missingModelIds = modelPackages
             .filter((model) => !catalogRequestedModelIdsRef.current.has(model.id))
             .map((model) => model.id);
@@ -391,6 +408,11 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
         } finally {
             setIsPropertyCatalogLoading(false);
         }
+    };
+
+    const openPropertyConfiguration = async () => {
+        setIsPropertyConfigurationOpen(true);
+        await loadPropertyDefinitionCatalogs();
     };
 
     useEffect(() => {
@@ -512,8 +534,8 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
         ? bootstrapPropertySets(selectedElement, selectedMetadata)
         : [];
     const selectedRenderObjectId = selectedElement?.propertyStore?.renderObjectId;
-    const effectiveVisiblePropertyKeys = visiblePropertyKeys
-        ?? getDefaultPropertyKeys(availableProperties);
+    const effectiveVisiblePropertyKeys = normalizePropertyKeys(visiblePropertyKeys
+        ?? getDefaultPropertyKeys(availableProperties), availableProperties);
     const selectedPropertyKeys = new Set(effectiveVisiblePropertyKeys);
     const needsConfiguredRetrieval = [...selectedPropertyKeys].some((key) => key.startsWith("canonical:"));
     const propertySets = (showAllProperties || needsConfiguredRetrieval)
@@ -597,52 +619,40 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
     const additionalFilterProperties = matchingFilterProperties.filter((property) =>
         property.propertyName.trim().toLocaleLowerCase() !== "category",
     );
-    const filterValues = useMemo(() => {
-        if (!filterPropertyKey) return [];
-        const values = new Map<string, number>();
-        Object.values(metadataByModelId).forEach((metadata) => {
-            Object.values(metadata.elements).forEach((element) => {
-                element.propertySetIds.forEach((propertySetId) => {
-                    const propertySet = metadata.propertySets[propertySetId];
-                    const property = propertySet?.properties.find((candidate) =>
-                        getPropertyKey(propertySet.name, candidate.name) === filterPropertyKey,
-                    );
-                    if (property) {
-                        const value = String(property.value);
-                        values.set(value, (values.get(value) ?? 0) + 1);
-                    }
-                });
-            });
+    const canonicalFilterPropertyKey = normalizePropertyKey(filterPropertyKey, availableProperties);
+    useEffect(() => {
+        if (!canonicalFilterPropertyKey) { void Promise.resolve().then(() => setFilterValues([])); return; }
+        let cancelled = false;
+        void Promise.all(modelPackages.map(async (model) => ({
+            modelId: model.id,
+            values: await getCanonicalPropertyValues(projectId, model.id, canonicalFilterPropertyKey).catch(() => []),
+        }))).then((results) => {
+            if (cancelled) return;
+            setFilterValues(results.flatMap(({ modelId, values }) => values.map((value) => ({
+                id: encodeModelValueId(modelId, value.valueId), value: value.displayValue, count: value.count,
+            }))).sort((left, right) => left.value.localeCompare(right.value, undefined, { numeric: true })));
         });
-        return [...values.entries()]
-            .map(([value, count]): FilterValue => ({ value, count }))
-            .sort((left, right) => left.value.localeCompare(right.value, undefined, { numeric: true }));
-    }, [filterPropertyKey, metadataByModelId]);
+        return () => { cancelled = true; };
+    }, [canonicalFilterPropertyKey, modelPackages, projectId]);
     const visibleFilterValues = filterValues.filter(({ value }) =>
         value.toLocaleLowerCase().includes(filterValueSearch.toLocaleLowerCase()),
     );
     const hasActivePropertyFilter = Boolean(filterPropertyKey && filterSelectedValues.length > 0);
-    const displayValues = useMemo(() => {
-        if (!displayPropertyKey) return [];
-        const values = new Map<string, number>();
-        Object.values(metadataByModelId).forEach((metadata) => {
-            Object.values(metadata.elements).forEach((element) => {
-                element.propertySetIds.forEach((propertySetId) => {
-                    const propertySet = metadata.propertySets[propertySetId];
-                    const property = propertySet?.properties.find((candidate) =>
-                        getPropertyKey(propertySet.name, candidate.name) === displayPropertyKey,
-                    );
-                    if (property) {
-                        const value = String(property.value);
-                        values.set(value, (values.get(value) ?? 0) + 1);
-                    }
-                });
-            });
+    const canonicalDisplayPropertyKey = normalizePropertyKey(displayPropertyKey, availableProperties);
+    useEffect(() => {
+        if (!canonicalDisplayPropertyKey) { void Promise.resolve().then(() => setDisplayValues([])); return; }
+        let cancelled = false;
+        void Promise.all(modelPackages.map(async (model) => ({
+            modelId: model.id,
+            values: await getCanonicalPropertyValues(projectId, model.id, canonicalDisplayPropertyKey).catch(() => []),
+        }))).then((results) => {
+            if (cancelled) return;
+            setDisplayValues(results.flatMap(({ modelId, values }) => values.map((value) => ({
+                id: encodeModelValueId(modelId, value.valueId), value: value.displayValue, count: value.count,
+            }))).sort((left, right) => left.value.localeCompare(right.value, undefined, { numeric: true })));
         });
-        return [...values.entries()]
-            .map(([value, count]): FilterValue => ({ value, count }))
-            .sort((left, right) => left.value.localeCompare(right.value, undefined, { numeric: true }));
-    }, [displayPropertyKey, metadataByModelId]);
+        return () => { cancelled = true; };
+    }, [canonicalDisplayPropertyKey, modelPackages, projectId]);
     const matchingDisplayProperties = availableProperties.filter((property) =>
         `${property.propertySetName} ${property.propertyName}`
             .toLocaleLowerCase()
@@ -656,48 +666,53 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
         const viewerService = viewerServiceRef.current;
         if (!viewerService) return;
         viewerService.setDisplayMode(displayMode, displayOpacity);
-        const selectedValues = new Set(displaySelectedValues);
-        const matchedObjectIds = displayPropertyKey && selectedValues.size > 0
-            ? Object.entries(metadataByModelId).flatMap(([modelId, metadata]) =>
-                Object.entries(metadata.elements)
-                    .filter(([, element]) => element.propertySetIds.some((propertySetId) => {
-                        const propertySet = metadata.propertySets[propertySetId];
-                        return propertySet?.properties.some((property) =>
-                            getPropertyKey(propertySet.name, property.name) === displayPropertyKey
-                            && selectedValues.has(String(property.value)),
-                        );
-                    }))
-                    .map(([rendererObjectId]) => `${modelId}#${rendererObjectId}`),
-            )
-            : [];
-        viewerService.setColorOverride(
-            matchedObjectIds,
-            matchedObjectIds.length > 0 ? hexToRgb(displayColor) : undefined,
-        );
-    }, [displayMode, displayOpacity, displayPropertyKey, displaySelectedValues, displayColor, metadataByModelId, loadedSceneVersion]);
+        if (!canonicalDisplayPropertyKey || displaySelectedValues.length === 0) {
+            viewerService.setColorOverride([], undefined);
+            return;
+        }
+        let cancelled = false;
+        const valuesByModel = new Map<string, string[]>();
+        displaySelectedValues.flatMap((selected) => {
+            const decoded = decodeModelValueId(selected);
+            return decoded ? [decoded] : displayValues.filter((value) => value.value === selected).map((value) => decodeModelValueId(value.id)!);
+        }).forEach((decoded) => {
+            valuesByModel.set(decoded.modelId, [...(valuesByModel.get(decoded.modelId) ?? []), decoded.valueId]);
+        });
+        void Promise.all(modelPackages.map(async (model) => ({
+            modelId: model.id,
+            matches: await getCanonicalPropertyMatches(projectId, model.id, canonicalDisplayPropertyKey, valuesByModel.get(model.id) ?? []).catch(() => ({ rendererObjectIds: [] })),
+        }))).then((results) => {
+            if (cancelled) return;
+            const matchedObjectIds = results.flatMap(({ modelId, matches }) => matches.rendererObjectIds.map((id) => `${modelId}#${id}`));
+            viewerService.setColorOverride(matchedObjectIds, matchedObjectIds.length > 0 ? hexToRgb(displayColor) : undefined);
+        });
+        return () => { cancelled = true; };
+    }, [displayMode, displayOpacity, canonicalDisplayPropertyKey, displaySelectedValues, displayValues, displayColor, modelPackages, projectId, loadedSceneVersion]);
 
     useEffect(() => {
         const viewerService = viewerServiceRef.current;
         if (!viewerService) return;
-        if (!filterPropertyKey) {
+        if (!canonicalFilterPropertyKey) {
             viewerService.clearPropertyFilter();
             return;
         }
-        const selectedValues = new Set(filterSelectedValues);
-        const visibleRendererObjectIds: Record<string, string[]> = {};
-        Object.entries(metadataByModelId).forEach(([modelId, metadata]) => {
-            visibleRendererObjectIds[modelId] = Object.entries(metadata.elements)
-                .filter(([, element]) => element.propertySetIds.some((propertySetId) => {
-                    const propertySet = metadata.propertySets[propertySetId];
-                    return propertySet?.properties.some((property) =>
-                        getPropertyKey(propertySet.name, property.name) === filterPropertyKey
-                        && selectedValues.has(String(property.value)),
-                    );
-                }))
-                .map(([rendererObjectId]) => rendererObjectId);
+        let cancelled = false;
+        const valuesByModel = new Map<string, string[]>();
+        filterSelectedValues.flatMap((selected) => {
+            const decoded = decodeModelValueId(selected);
+            return decoded ? [decoded] : filterValues.filter((value) => value.value === selected).map((value) => decodeModelValueId(value.id)!);
+        }).forEach((decoded) => {
+            valuesByModel.set(decoded.modelId, [...(valuesByModel.get(decoded.modelId) ?? []), decoded.valueId]);
         });
-        viewerService.setPropertyFilter(visibleRendererObjectIds);
-    }, [filterPropertyKey, filterSelectedValues, metadataByModelId, loadedSceneVersion]);
+        void Promise.all(modelPackages.map(async (model) => ({
+            modelId: model.id,
+            matches: await getCanonicalPropertyMatches(projectId, model.id, canonicalFilterPropertyKey, valuesByModel.get(model.id) ?? []).catch(() => ({ rendererObjectIds: [] })),
+        }))).then((results) => {
+            if (cancelled) return;
+            viewerService.setPropertyFilter(Object.fromEntries(results.map(({ modelId, matches }) => [modelId, matches.rendererObjectIds])));
+        });
+        return () => { cancelled = true; };
+    }, [canonicalFilterPropertyKey, filterSelectedValues, filterValues, modelPackages, projectId, loadedSceneVersion]);
     const filteredIssues = useMemo(() => {
         const search = issueSearch.trim().toLocaleLowerCase();
         return issues
@@ -845,12 +860,19 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
             : [...current, value]);
     };
 
-    const filterBySelectedProperty = (property: {
+    const filterBySelectedProperty = async (property: {
         filterKey: string;
         value: unknown;
     }) => {
+        if (!selection) return;
+        const values = await getCanonicalPropertyValues(projectId, selection.modelId, property.filterKey);
+        const match = values.find((entry) => entry.displayValue === String(property.value));
+        if (!match) {
+            setStatus("This property value is not available for filtering.");
+            return;
+        }
         setFilterPropertyKey(property.filterKey);
-        setFilterSelectedValues([String(property.value)]);
+        setFilterSelectedValues([encodeModelValueId(selection.modelId, match.valueId)]);
         setFilterPropertySearch("");
         setFilterValueSearch("");
         setStatus("Property filter applied");
@@ -871,9 +893,9 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                 name: displayViewName.trim(),
                 mode: displayMode,
                 opacity: displayOpacity,
-                ...(displayPropertyKey && displaySelectedValues.length > 0 ? {
+                ...(canonicalDisplayPropertyKey && displaySelectedValues.length > 0 ? {
                     colorOverride: {
-                        propertyKey: displayPropertyKey,
+                        propertyKey: canonicalDisplayPropertyKey,
                         values: displaySelectedValues,
                         color: displayColor,
                     },
@@ -891,7 +913,7 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
     const applyDisplayView = (view: ProjectDisplayView) => {
         setDisplayMode(view.mode);
         setDisplayOpacity(view.opacity);
-        setDisplayPropertyKey(view.colorOverride?.propertyKey ?? "");
+        setDisplayPropertyKey(normalizePropertyKey(view.colorOverride?.propertyKey ?? "", availableProperties));
         setDisplaySelectedValues(view.colorOverride?.values ?? []);
         setDisplayColor(view.colorOverride?.color ?? "#ff8a00");
         setDisplayValueSearch("");
@@ -952,6 +974,7 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
             setIsSelectionPanelVisible((visible) => !visible);
             return;
         }
+        if (tool === "filter" || tool === "display") void loadPropertyDefinitionCatalogs();
         setActiveTool((current) => current === tool ? null : tool);
     };
 
@@ -1326,13 +1349,13 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                                     onChange={(event) => setDisplayValueSearch(event.target.value)}
                                 />
                                 <div className="property-filter-actions">
-                                    <button type="button" onClick={() => setDisplaySelectedValues(displayValues.map(({ value }) => value))}>Select all</button>
+                                    <button type="button" onClick={() => setDisplaySelectedValues(displayValues.map(({ id }) => id))}>Select all</button>
                                     <button type="button" onClick={() => setDisplaySelectedValues([])}>Clear</button>
                                 </div>
                                 <div className="property-filter-values">
-                                    {visibleDisplayValues.map(({ value, count }) => (
-                                        <label key={value} className="property-filter-value">
-                                            <input type="checkbox" checked={displaySelectedValues.includes(value)} onChange={() => toggleDisplayValue(value)} />
+                                    {visibleDisplayValues.map(({ id, value, count }) => (
+                                        <label key={id} className="property-filter-value">
+                                            <input type="checkbox" checked={displaySelectedValues.includes(id)} onChange={() => toggleDisplayValue(id)} />
                                             <span>{value}</span><small>{count}</small>
                                         </label>
                                     ))}
@@ -1536,7 +1559,7 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                                     <div className="property-filter-actions">
                                         <button
                                             type="button"
-                                            onClick={() => setFilterSelectedValues(filterValues.map(({ value }) => value))}
+                                            onClick={() => setFilterSelectedValues(filterValues.map(({ id }) => id))}
                                         >
                                             Select all
                                         </button>
@@ -1552,12 +1575,12 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                                         </button>
                                     </div>
                                     <div className="property-filter-values">
-                                        {visibleFilterValues.map(({ value, count }) => (
-                                            <label key={value} className="property-filter-value">
+                                        {visibleFilterValues.map(({ id, value, count }) => (
+                                            <label key={id} className="property-filter-value">
                                                 <input
                                                     type="checkbox"
-                                                    checked={filterSelectedValues.includes(value)}
-                                                    onChange={() => toggleFilterValue(value)}
+                                                    checked={filterSelectedValues.includes(id)}
+                                                    onChange={() => toggleFilterValue(id)}
                                                 />
                                                 <span>{value}</span>
                                                 <small>{count}</small>
@@ -1641,7 +1664,7 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                                         className="property-filter-button"
                                         aria-label={`Filter by ${property.name}: ${String(property.value)}`}
                                         title={`Filter: ${property.name} = ${String(property.value)}`}
-                                        onClick={() => filterBySelectedProperty(property)}
+                                        onClick={() => void filterBySelectedProperty(property)}
                                     >
                                         <ToolIcon name="filter" />
                                     </button>
@@ -1713,7 +1736,7 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                                             <span>{view.propertyKeys.length} properties</span>
                                             <button
                                                 type="button"
-                                                onClick={() => setVisiblePropertyKeys(view.propertyKeys)}
+                                                onClick={() => setVisiblePropertyKeys(normalizePropertyKeys(view.propertyKeys, availableProperties))}
                                             >
                                                 Apply
                                             </button>
