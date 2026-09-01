@@ -3,6 +3,7 @@ export interface ModelProperty {
     value: unknown;
     type?: string;
     description?: string;
+    propertyDefinitionId?: string;
 }
 
 export interface ModelPropertySet {

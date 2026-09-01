@@ -21,6 +21,8 @@ import {
     listProjectPropertyViews,
     listProjectDisplayViews,
     getPublishedElementProperties,
+    getPropertyDefinitionCatalog,
+    type PropertyDefinitionCatalogEntry,
     updateProjectIssue,
     updateProjectIssueStatus,
 } from "../services/ProjectService";
@@ -63,6 +65,10 @@ interface PanoramaMarkerLayout {
 
 function getPropertyKey(propertySetName: string, propertyName: string): string {
     return `${propertySetName}::${propertyName}`;
+}
+
+function propertyDefinitionKey(propertySet: ModelPropertySet, property: ModelPropertySet["properties"][number]): string {
+    return property.propertyDefinitionId ?? getPropertyKey(propertySet.name, property.name);
 }
 
 function getDefaultPropertyKeys(properties: AvailableProperty[]): string[] {
@@ -191,6 +197,8 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
         range: { lower: number; cut: number; upper: number };
     } | null>(null);
     const packageVisibilityRef = useRef<Record<string, boolean>>({});
+    const catalogRequestedModelIdsRef = useRef(new Set<string>());
+    const propertyRetrievalRequestRefs = useRef(new Set<string>());
     const [status, setStatus] = useState("Loading model...");
     const [selection, setSelection] = useState<ElementSelection | null>(null);
     const [elementActionContext, setElementActionContext] = useState<ElementActionContext | null>(null);
@@ -201,6 +209,9 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
     const [retrievedPropertyReference, setRetrievedPropertyReference] = useState<string | null>(null);
     const [isPropertyRetrievalLoading, setIsPropertyRetrievalLoading] = useState(false);
     const [propertyRetrievalError, setPropertyRetrievalError] = useState("");
+    const [propertyDefinitionsByModelId, setPropertyDefinitionsByModelId] = useState<Record<string, PropertyDefinitionCatalogEntry[]>>({});
+    const [isPropertyCatalogLoading, setIsPropertyCatalogLoading] = useState(false);
+    const [propertyCatalogError, setPropertyCatalogError] = useState("");
     const [propertySearch, setPropertySearch] = useState("");
     const [isCutMode, setIsCutMode] = useState(false);
     const [cutCount, setCutCount] = useState(0);
@@ -341,11 +352,46 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                 });
             });
         });
+        Object.values(propertyDefinitionsByModelId).forEach((definitions) => {
+            definitions.forEach((definition) => {
+                properties.set(definition.propertyDefinitionId, {
+                    key: definition.propertyDefinitionId,
+                    propertySetName: definition.propertySetName,
+                    propertyName: definition.displayName,
+                });
+            });
+        });
         return [...properties.values()].sort((left, right) =>
             `${left.propertySetName} ${left.propertyName}`.localeCompare(
                 `${right.propertySetName} ${right.propertyName}`,
             ));
-    }, [metadataByModelId]);
+    }, [metadataByModelId, propertyDefinitionsByModelId]);
+
+    const openPropertyConfiguration = async () => {
+        setIsPropertyConfigurationOpen(true);
+        const missingModelIds = modelPackages
+            .filter((model) => !catalogRequestedModelIdsRef.current.has(model.id))
+            .map((model) => model.id);
+        if (missingModelIds.length === 0) return;
+        missingModelIds.forEach((modelId) => catalogRequestedModelIdsRef.current.add(modelId));
+        setIsPropertyCatalogLoading(true);
+        setPropertyCatalogError("");
+        try {
+            const catalogs = await Promise.all(missingModelIds.map(async (modelId) => ({
+                modelId,
+                definitions: await getPropertyDefinitionCatalog(projectId, modelId),
+            })));
+            setPropertyDefinitionsByModelId((current) => ({
+                ...current,
+                ...Object.fromEntries(catalogs.map(({ modelId, definitions }) => [modelId, definitions])),
+            }));
+        } catch (error) {
+            missingModelIds.forEach((modelId) => catalogRequestedModelIdsRef.current.delete(modelId));
+            setPropertyCatalogError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setIsPropertyCatalogLoading(false);
+        }
+    };
 
     useEffect(() => {
         if (visiblePropertyKeys !== null) {
@@ -466,28 +512,46 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
         ? bootstrapPropertySets(selectedElement, selectedMetadata)
         : [];
     const selectedRenderObjectId = selectedElement?.propertyStore?.renderObjectId;
-    const propertySets = showAllProperties
+    const effectiveVisiblePropertyKeys = visiblePropertyKeys
+        ?? getDefaultPropertyKeys(availableProperties);
+    const selectedPropertyKeys = new Set(effectiveVisiblePropertyKeys);
+    const needsConfiguredRetrieval = [...selectedPropertyKeys].some((key) => key.startsWith("canonical:"));
+    const propertySets = (showAllProperties || needsConfiguredRetrieval)
         && selectedRenderObjectId
         && retrievedPropertyReference === `${selection?.modelId}:${selectedRenderObjectId}`
         && retrievedPropertySets
         ? retrievedPropertySets
         : bootstrapSets;
-    const effectiveVisiblePropertyKeys = visiblePropertyKeys
-        ?? getDefaultPropertyKeys(availableProperties);
-    const selectedPropertyKeys = new Set(effectiveVisiblePropertyKeys);
     const selectedProperties = propertySets.flatMap((propertySet) =>
         propertySet.properties
             .filter((property) => Boolean(selectedElement?.identity) || showAllProperties || selectedPropertyKeys.has(
-                getPropertyKey(propertySet.name, property.name),
+                propertyDefinitionKey(propertySet, property),
             ))
             .map((property) => ({
                 key: `${propertySet.id}:${property.name}`,
-                filterKey: getPropertyKey(propertySet.name, property.name),
+                filterKey: propertyDefinitionKey(propertySet, property),
                 name: property.name,
                 value: property.value,
                 propertySetName: propertySet.name,
             })),
     );
+    useEffect(() => {
+        if (!selection || !selectedRenderObjectId || !needsConfiguredRetrieval || showAllProperties) return;
+        const reference = `${selection.modelId}:${selectedRenderObjectId}`;
+        if (retrievedPropertyReference === reference || propertyRetrievalRequestRefs.current.has(reference)) return;
+        propertyRetrievalRequestRefs.current.add(reference);
+        void Promise.resolve().then(async () => {
+            setIsPropertyRetrievalLoading(true);
+            setPropertyRetrievalError("");
+            const response = await getPublishedElementProperties(projectId, selection.modelId, selectedRenderObjectId);
+            setRetrievedPropertyReference(reference);
+            setRetrievedPropertySets(response.propertySets);
+        }).catch((error: unknown) => setPropertyRetrievalError(error instanceof Error ? error.message : String(error)))
+            .finally(() => {
+                propertyRetrievalRequestRefs.current.delete(reference);
+                setIsPropertyRetrievalLoading(false);
+            });
+    }, [effectiveVisiblePropertyKeys, needsConfiguredRetrieval, projectId, retrievedPropertyReference, selectedRenderObjectId, selection, showAllProperties]);
     const toggleAllProperties = async () => {
         if (!selectedElement) return;
         if (showAllProperties) {
@@ -1555,7 +1619,7 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                     <button
                         type="button"
                         className="properties-button"
-                        onClick={() => setIsPropertyConfigurationOpen(true)}
+                        onClick={() => void openPropertyConfiguration()}
                     >
                         Properties
                     </button>
@@ -1623,6 +1687,8 @@ function Viewer({ projectId, modelPackages, pointCloudPackages, panoramaStations
                             <button type="button" onClick={() => setVisiblePropertyKeys(getDefaultPropertyKeys(availableProperties))}>Use defaults</button>
                             <button type="button" onClick={() => setVisiblePropertyKeys([])}>Clear selection</button>
                         </div>
+                        {isPropertyCatalogLoading && <p className="selection-note">Loading available properties...</p>}
+                        {propertyCatalogError && <p className="property-view-error">{propertyCatalogError}</p>}
                         <section className="property-view-manager" aria-label="Saved property views">
                             <div className="property-view-save-row">
                                 <input

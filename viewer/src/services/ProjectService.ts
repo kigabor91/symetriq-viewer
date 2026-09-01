@@ -11,6 +11,15 @@ export interface RetrievedElementProperties {
     propertySets: ModelPropertySet[];
 }
 
+export interface PropertyDefinitionCatalogEntry {
+    propertyDefinitionId: string;
+    propertySetName: string;
+    displayName: string;
+    valueType: string | null;
+    unit: string | null;
+    scope: "instance" | "type";
+}
+
 async function readResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
         const body = await response.json().catch(() => ({})) as { error?: string };
@@ -45,6 +54,15 @@ export async function getPublishedElementProperties(
 ): Promise<RetrievedElementProperties> {
     return readResponse<RetrievedElementProperties>(await fetch(
         `/api/projects/${encodeURIComponent(projectId)}/models/${encodeURIComponent(modelId)}/render-objects/${encodeURIComponent(renderObjectId)}/properties`,
+    ));
+}
+
+export async function getPropertyDefinitionCatalog(
+    projectId: string,
+    modelId: string,
+): Promise<PropertyDefinitionCatalogEntry[]> {
+    return readResponse<PropertyDefinitionCatalogEntry[]>(await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/models/${encodeURIComponent(modelId)}/property-definitions`,
     ));
 }
 
