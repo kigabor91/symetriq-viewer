@@ -185,7 +185,11 @@ export class ResumableUploadClient {
     private state: ResumableUploadState = "idle";
 
     constructor(options: ResumableUploadClientOptions = {}) {
-        this.fetchImplementation = options.fetch ?? fetch;
+        // Browser-native fetch is a Web API method and may reject an invocation
+        // whose receiver is an arbitrary class instance before issuing a request.
+        // Bind it to the global object once so calls through this client keep the
+        // browser's required receiver and actually reach the network stack.
+        this.fetchImplementation = (options.fetch ?? globalThis.fetch).bind(globalThis);
         this.storage = options.storage ?? window.localStorage;
         this.concurrency = options.concurrency ?? DEFAULT_RESUMABLE_UPLOAD_CONCURRENCY;
         this.retryDelaysMs = options.retryDelaysMs ?? [500, 1_500, 4_000];

@@ -56,6 +56,53 @@ test("part slicing honors server-sized chunks, a partial final chunk and >2 GiB 
     );
 });
 
+test("invokes fetch with the browser global receiver", async () => {
+    const file = new File(["x"], "scan.e57", { lastModified: 123 });
+    const fetchMock = async function (
+        this: unknown,
+        input: RequestInfo | URL,
+        init?: RequestInit,
+    ): Promise<Response> {
+        assert.equal(this, globalThis);
+        const url = String(input);
+        if (url.endsWith("/api/projects/project-1/uploads")) {
+            return json(session({ totalBytes: 1, chunkSize: 1, totalParts: 1 }));
+        }
+        if (url.endsWith("/parts/0")) return json({ receivedBytes: 1 }, 201);
+        if (url.endsWith("/api/uploads/upload-1") && init?.method !== "POST") {
+            return json(session({
+                status: "uploading",
+                totalBytes: 1,
+                receivedBytes: 1,
+                chunkSize: 1,
+                totalParts: 1,
+                uploadedParts: [0],
+            }));
+        }
+        if (url.endsWith("/complete") && init?.method === "POST") {
+            return json(session({
+                status: "complete",
+                totalBytes: 1,
+                receivedBytes: 1,
+                chunkSize: 1,
+                totalParts: 1,
+                uploadedParts: [0],
+            }));
+        }
+        throw new Error(`Unexpected request ${url}`);
+    } as typeof fetch;
+
+    const result = await new ResumableUploadClient({
+        fetch: fetchMock,
+        storage: new MemoryStorage(),
+        retryDelaysMs: [],
+        delay: immediateDelay,
+        idFactory: () => "receiver-test",
+    }).start("project-1", file, "structured-e57");
+
+    assert.equal(result.status, "complete");
+});
+
 test("uploads raw Blob slices with concurrency two, then finalizes and polls to complete", async () => {
     const file = new File([Buffer.from("abcdefghij")], "scan.e57", { lastModified: 123 });
     const storage = new MemoryStorage();
