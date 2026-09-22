@@ -10,6 +10,7 @@ import {
     updateProjectPlanSettings,
     uploadProjectFiles,
 } from "../services/ProjectService";
+import { ResumableUploadPanel } from "./ResumableUploadPanel";
 
 interface ProjectDetailsProps {
     projectId: string;
@@ -210,6 +211,8 @@ export function ProjectDetails({ projectId, onBack, onOpenScene }: ProjectDetail
                     {isUploading ? "Uploading..." : "Upload and process"}
                 </button>
             </section>
+
+            {import.meta.env.DEV && <ResumableUploadPanel key={projectId} projectId={projectId} />}
 
             {error && <p className="workspace-error">{error}</p>}
             {convertingFiles && (

@@ -53,6 +53,7 @@
 
 .create-project-card,
 .upload-card,
+.resumable-upload-card,
 .files-card,
 .workspace-error,
 .processing-notice {
@@ -63,6 +64,7 @@
 
 .create-project-card,
 .upload-card,
+.resumable-upload-card,
 .files-card {
     padding: 24px;
 }
@@ -189,6 +191,38 @@
 .files-card {
     margin-top: 20px;
 }
+
+.resumable-upload-card {
+    display: grid;
+    max-width: 1180px;
+    margin: 20px auto 0;
+    gap: 18px;
+}
+
+.resumable-upload-picker,
+.resumable-upload-actions,
+.resumable-upload-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.resumable-upload-picker .file-dropzone { flex: 1; }
+.resumable-upload-heading { justify-content: space-between; }
+.resumable-upload-heading span { color: #5e6d7e; font-size: 13px; }
+
+.resumable-upload-item {
+    display: grid;
+    gap: 8px;
+    border-top: 1px solid #e1e7ed;
+    padding-top: 14px;
+}
+
+.resumable-upload-item progress { width: 100%; }
+.resumable-upload-item small { color: #6a7988; }
+.resumable-upload-item > .file-action-button { justify-self: start; }
+.resumable-upload-actions .file-action-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.resumable-upload-error { width: 100%; margin: 0; }
 
 .project-file-row {
     display: grid;
@@ -367,6 +401,7 @@
 @media (max-width: 760px) {
     .workspace-page { padding: 24px 16px 40px; }
     .workspace-header, .upload-card { align-items: stretch; flex-direction: column; }
+    .resumable-upload-picker, .resumable-upload-heading { align-items: stretch; flex-direction: column; }
     .create-project-card form, .upload-card { grid-template-columns: 1fr; }
     .project-header { display: flex; }
     .scene-button { width: 100%; }

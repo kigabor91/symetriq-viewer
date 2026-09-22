@@ -8,6 +8,7 @@
     "dev:alpha": "vite --mode alpha",
     "build": "tsc -b && vite build",
     "build:production": "npm run build && node deployment/copy-iis-config.mjs",
+    "test": "node --test --experimental-strip-types tests/*.test.ts",
     "lint": "eslint .",
     "preview": "vite preview",
     "postinstall": "patch-package"
