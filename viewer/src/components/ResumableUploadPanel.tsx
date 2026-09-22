@@ -56,8 +56,9 @@ export function ResumableUploadPanel({ projectId }: ResumableUploadPanelProps) {
         };
     }, []);
 
-    const createClient = (key: string) => {
+    const createClient = (key: string, idempotencyKey?: string) => {
         const client = new ResumableUploadClient({
+            ...(idempotencyKey ? { idFactory: () => idempotencyKey } : {}),
             onChange: (snapshot) => {
                 if (!mounted.current) return;
                 setSnapshots((current) => ({ ...current, [key]: snapshot }));
@@ -80,7 +81,7 @@ export function ResumableUploadPanel({ projectId }: ResumableUploadPanelProps) {
         setSelectedFile(undefined);
         setError("");
         try {
-            await createClient(key).start(projectId, file, kind);
+            await createClient(key, key).start(projectId, file, kind);
         } catch (uploadError) {
             setError(uploadError instanceof Error ? uploadError.message : String(uploadError));
         } finally {
@@ -184,8 +185,12 @@ export function ResumableUploadPanel({ projectId }: ResumableUploadPanelProps) {
                 </article>
             ))}
 
-            {storedUploads.filter((stored) => !Object.values(snapshots).some(
-                (snapshot) => snapshot.uploadId !== undefined && snapshot.uploadId === stored.uploadId,
+            {storedUploads.filter((stored) => (
+                snapshots[stored.idempotencyKey] === undefined
+                && (stored.uploadId === undefined || snapshots[stored.uploadId] === undefined)
+                && !Object.values(snapshots).some(
+                    (snapshot) => snapshot.uploadId !== undefined && snapshot.uploadId === stored.uploadId,
+                )
             )).map((stored) => (
                 <article className="resumable-upload-item" key={stored.uploadId ?? stored.idempotencyKey}>
                     <div className="resumable-upload-heading">

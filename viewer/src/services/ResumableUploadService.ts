@@ -214,22 +214,29 @@ export class ResumableUploadClient {
         };
         storeResumableUpload(this.stored, this.storage);
         this.publish("creating-session", undefined, file);
-        const session = await this.requestWithRetry<UploadSessionDto>(
-            `/api/projects/${encodeURIComponent(projectId)}/uploads`,
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Idempotency-Key": idempotencyKey,
+        let session: UploadSessionDto;
+        try {
+            session = await this.requestWithRetry<UploadSessionDto>(
+                `/api/projects/${encodeURIComponent(projectId)}/uploads`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Idempotency-Key": idempotencyKey,
+                    },
+                    body: JSON.stringify({
+                        filename: file.name,
+                        mimeType: file.type || "application/octet-stream",
+                        fileKind,
+                        totalBytes: file.size,
+                    }),
                 },
-                body: JSON.stringify({
-                    filename: file.name,
-                    mimeType: file.type || "application/octet-stream",
-                    fileKind,
-                    totalBytes: file.size,
-                }),
-            },
-        );
+            );
+        } catch (error) {
+            const normalized = this.normalizeError(error);
+            this.publish(normalized.retryable || normalized.status === 0 ? "recoverable" : "failed", this.userMessage(normalized));
+            throw normalized;
+        }
         this.session = session;
         this.stored = {
             ...this.stored,
@@ -255,22 +262,28 @@ export class ResumableUploadClient {
             this.session = await this.getSession(stored.uploadId);
         } else {
             this.publish("creating-session", undefined, file);
-            this.session = await this.requestWithRetry<UploadSessionDto>(
-                `/api/projects/${encodeURIComponent(stored.projectId)}/uploads`,
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Idempotency-Key": stored.idempotencyKey,
+            try {
+                this.session = await this.requestWithRetry<UploadSessionDto>(
+                    `/api/projects/${encodeURIComponent(stored.projectId)}/uploads`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Idempotency-Key": stored.idempotencyKey,
+                        },
+                        body: JSON.stringify({
+                            filename: file.name,
+                            mimeType: file.type || "application/octet-stream",
+                            fileKind: stored.fileKind,
+                            totalBytes: file.size,
+                        }),
                     },
-                    body: JSON.stringify({
-                        filename: file.name,
-                        mimeType: file.type || "application/octet-stream",
-                        fileKind: stored.fileKind,
-                        totalBytes: file.size,
-                    }),
-                },
-            );
+                );
+            } catch (error) {
+                const normalized = this.normalizeError(error);
+                this.publish(normalized.retryable || normalized.status === 0 ? "recoverable" : "failed", this.userMessage(normalized));
+                throw normalized;
+            }
             this.stored = { ...stored, uploadId: this.session.uploadId };
             storeResumableUpload(this.stored, this.storage);
         }
@@ -297,7 +310,7 @@ export class ResumableUploadClient {
                 `/api/uploads/${encodeURIComponent(uploadId)}`,
                 { method: "DELETE" },
             );
-            if (!response.ok) throw await this.responseError(response);
+            if (!response.ok) throw await this.responseError(response, `/api/uploads/${encodeURIComponent(uploadId)}`);
             removeStoredResumableUpload(uploadId, this.storage);
         } else if (this.stored) {
             removeStoredResumableUpload(this.stored.idempotencyKey, this.storage);
@@ -462,7 +475,7 @@ export class ResumableUploadClient {
         this.activeControllers.add(controller);
         try {
             const response = await this.fetchImplementation(url, { ...init, signal: controller.signal });
-            if (!response.ok) throw await this.responseError(response);
+            if (!response.ok) throw await this.responseError(response, url);
             return await response.json() as T;
         } catch (error) {
             if (error instanceof ResumableUploadError) throw error;
@@ -475,12 +488,16 @@ export class ResumableUploadClient {
         }
     }
 
-    private async responseError(response: Response): Promise<ResumableUploadError> {
+    private async responseError(response: Response, requestUrl = ""): Promise<ResumableUploadError> {
         const body = await response.json().catch(() => ({})) as BackendErrorBody;
         const details = typeof body.error === "object" ? body.error : undefined;
+        const createEndpointMissing = response.status === 404
+            && /\/api\/projects\/[^/]+\/uploads$/.test(requestUrl);
         return new ResumableUploadError(
-            details?.code ?? `HTTP_${response.status}`,
-            details?.message ?? (typeof body.error === "string" ? body.error : `Request failed with status ${response.status}.`),
+            createEndpointMissing ? "UPLOAD_API_UNAVAILABLE" : (details?.code ?? `HTTP_${response.status}`),
+            createEndpointMissing
+                ? "The connected Hub backend does not provide the resumable upload API. Update and restart the converter backend."
+                : (details?.message ?? (typeof body.error === "string" ? body.error : `Request failed with status ${response.status}.`)),
             response.status,
             details?.retryable ?? response.status >= 500,
         );
@@ -498,13 +515,16 @@ export class ResumableUploadClient {
 
     private userMessage(error: ResumableUploadError): string {
         if (error.code === "PART_CONFLICT") return "The selected file differs from data already uploaded for this session.";
+        if (error.code === "UPLOAD_API_UNAVAILABLE") return error.message;
         if (error.code === "UPLOAD_NOT_FOUND" || error.status === 404) return "The upload session no longer exists.";
         if (error.code.includes("EXPIRED") || error.status === 410) return "The upload expired. Start a new upload.";
         if (error.code.includes("CANCELLED")) return "Upload cancelled.";
         if (error.code.includes("HASH") || error.code.includes("INTEGRITY") || error.code.includes("FINAL")) {
             return "The upload could not be finalized safely.";
         }
-        if (error.status === 0) return "The network connection was interrupted. Reselect the file to resume.";
+        if (error.status === 0) {
+            return "The resumable upload API could not be reached. Check the Viewer proxy target and confirm the R2B.3 backend is running.";
+        }
         return error.message;
     }
 

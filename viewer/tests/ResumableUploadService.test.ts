@@ -150,6 +150,23 @@ test("session creation retries with the same idempotency key", async () => {
     assert.deepEqual(keys, ["stable-key", "stable-key"]);
 });
 
+test("a backend without the resumable route reports an actionable API error", async () => {
+    let snapshot: ResumableUploadSnapshot | undefined;
+    const client = new ResumableUploadClient({
+        fetch: async () => new Response("Cannot POST", { status: 404, headers: { "Content-Type": "text/html" } }),
+        storage: new MemoryStorage(),
+        retryDelaysMs: [],
+        delay: immediateDelay,
+        onChange: (next) => { snapshot = next; },
+    });
+    await assert.rejects(
+        client.start("project-1", new File(["data"], "scan.e57"), "structured-e57"),
+        (error: unknown) => error instanceof ResumableUploadError && error.code === "UPLOAD_API_UNAVAILABLE",
+    );
+    assert.equal(snapshot?.state, "failed");
+    assert.match(snapshot?.message ?? "", /update and restart/i);
+});
+
 test("resume trusts uploadedParts and sends only the missing chunk", async () => {
     const file = new File([Buffer.from("abcdefghijklmnop")], "scan.e57", { lastModified: 5 });
     const stored: StoredResumableUpload = {
